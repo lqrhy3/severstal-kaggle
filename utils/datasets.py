@@ -1,10 +1,14 @@
 import os
 import cv2
-import torch
+import h5py
 from torch.utils.data import Dataset, DataLoader
 import albumentations as albu
+from albumentations import pytorch as albu_pytorch
 from sklearn.model_selection import train_test_split
 from utils.utils import make_mask
+from configs.train_params import RANDOM_SEED
+import warnings
+warnings.filterwarnings('ignore')
 
 
 class SteelSegmentationDataset(Dataset):
@@ -35,12 +39,36 @@ class SteelClassificationDataset(Dataset):
     def __getitem__(self, idx):
         fname, target = self.df.iloc[idx].values
         image = cv2.imread(os.path.join(self.data_dir, fname))
-        image = self.transforms(image)['image']
+        image = self.transforms(image=image)['image']
 
-        return image, target
+        return image, float(target)
 
     def __len__(self):
         return len(self.df)
+
+
+class SteelHDF5ClassificationDataset(Dataset):
+    def __init__(self, path_to_hdf5, phase='train', mean=None, std=None):
+        self.path_to_hdf5 = path_to_hdf5
+        h = h5py.File(path_to_hdf5, 'r')
+        self.images = h['images']
+        self.labels = h['labels']
+        h.close()
+
+        self.transforms = get_transforms(phase, mean, std)
+
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        target = self.labels[idx]
+        image = self.transforms(image=image)['image']
+
+        return image, float(target)
+
+    def __len__(self):
+        h = h5py.File(self.path_to_hdf5, 'r')
+        len_ = len(h)
+        h.close()
+        return len_
 
 
 def get_transforms(phase, mean, std, list_transforms=None):
@@ -57,8 +85,8 @@ def get_transforms(phase, mean, std, list_transforms=None):
         )
     list_transforms.extend(
         [
-            albu.Normalize(mean=mean, std=std, p=1.),
-            albu.pytorch.ToTensor()
+            albu.Normalize(mean=mean, std=std),
+            albu_pytorch.ToTensor()
         ]
     )
 
@@ -78,3 +106,5 @@ def data_provider(df, data_dir, phase, dataset_cls, batch_size, stratify_by, n_w
                             shuffle=True
                             )
     return dataloader
+
+

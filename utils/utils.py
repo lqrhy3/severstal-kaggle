@@ -97,3 +97,5 @@ def show_images_with_defects(df, idxs_to_show=None):
     plt.show()
 
 
+def forward_constants(module, **constants):
+    module.__globals__.update(constants)

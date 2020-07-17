@@ -1,6 +1,8 @@
 import os
 import datetime
 import logging
+import warnings
+warnings.filterwarnings('ignore')
 
 
 class Logger:
@@ -10,8 +12,7 @@ class Logger:
         self.level = logging.INFO
         self.logger = logging.getLogger(name)
         self.logger.setLevel(self.level)
-        # self.path_to_log = os.path.join('..', 'log', session_id, name + '.log')
-        self.path_to_log = os.path.join('.', name + '.log')
+        self.path_to_log = os.path.join('log', session_id, name + '.log')
         self.verbose = False
 
         # Logger configuration
@@ -31,19 +32,19 @@ class Logger:
         self.logger.info(msg)
 
     def start_log(self, comment):
-        msg = 'Training started at ⏰:' + datetime.datetime.now().strftime('%H:%M:%S, %b %d') + '\n'
+        msg = 'Training started at ' + datetime.datetime.now().strftime('%H:%M:%S, %b %d') + '\n'
         msg += comment + '\n'
         msg += '___________________________________________________________________\n'
         self.info(msg)
 
     def epoch_log(self, epoch, phases, losses, metrics):
-        msg = 'Epoch №' + epoch + ' passed at ' + datetime.datetime.now().strftime('%H:%M') + '\n'
+        msg = 'Epoch №' + str(epoch) + ' passed at ' + datetime.datetime.now().strftime('%H:%M') + '\n'
         for phase in phases:
-            msg += phase.capitalize() + ' loss:\t' + str(round(losses[phase][-1], 7))
+            msg += (phase.capitalize() + ' loss: ').ljust(12) + str(round(losses[phase][-1], 7)) + '\n'
 
-            msg += phase.capitalize() + 'metrics. '
-            for m_name, m_value in metrics[phase]:
+            msg += (phase.capitalize() + ' metrics').ljust(13) + ' ---> '
+            for m_name, m_value in metrics[phase].items():
                 msg += m_name.capitalize() + ': ' + str(round(m_value[-1], 5)) + '\t'
-        msg += '\n'
+            msg += '\n'
 
         self.info(msg)
