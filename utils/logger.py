@@ -5,6 +5,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+LOG_DIR = 'log'
+
+
 class Logger:
     def __init__(self, name, session_id='', format='%(message)s'):
         self.name = name
@@ -12,7 +15,7 @@ class Logger:
         self.level = logging.INFO
         self.logger = logging.getLogger(name)
         self.logger.setLevel(self.level)
-        self.path_to_log = os.path.join('log', session_id, name + '.log')
+        self.path_to_log = os.path.join(LOG_DIR, session_id, name + '.log')
         self.verbose = False
 
         # Logger configuration

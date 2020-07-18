@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import math
 import cv2
 import logging
 import pandas as pd
@@ -10,11 +11,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torch.optim.optimizer import Optimizer
 import albumentations as albu
 from albumentations import pytorch as albu_pytorch
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score as roc_auc_skl
-from torchvision.models import resnet34
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -28,11 +28,11 @@ setInterval(ConnectButton,60000);'''
 
 # configs/train_params.py
 SESSION_ID = datetime.datetime.now().strftime('%y.%m.%d_%H-%M')
-PATH_TO_DF = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/severstal-steel-data/train_clf.csv'
-LOG_DIR = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/log'
+PATH_TO_DF = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/severstal-steel-data/train_sgm.csv'
+LOG_DIR = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/log/segmentation'
 DATA_DIR = '.'
 LEARNING_RATE = 1e-4
-MODEL_NAME = 'efficient_net_b1'
+MODEL_NAME = ''
 EARLY_STOPPING = None
 RANDOM_SEED = 42
 
@@ -63,7 +63,7 @@ def rle2mask(mask_rle, shape=(1600, 256)):
     ends = starts + lengths
     img = np.zeros(shape[0]*shape[1], np.uint8)
     for st, en in zip(starts, ends):
-        img[st:en] = 1
+        img[st:en] = 255
 
     return img.reshape(shape).T
 
@@ -100,34 +100,6 @@ def show_mask(row_idx, df, data_dir='severstal-steel-data/train_images',
         plt.show()
 
 
-def show_pallet(pallet=((250, 230, 20), (30, 200, 241), (200, 30, 250), (250, 60, 20))):
-    fig, ax = plt.subplots(1, 4, figsize=(6, 2))
-    for i in range(4):
-        ax[i].axis('off')
-        ax[i].imshow(np.ones((10, 40, 3), dtype=np.uint8) * pallet[i])
-        ax[i].set_title("class{}".format(i+1))
-
-    plt.show()
-
-
-def show_images_with_defects(df, idxs_to_show=None):
-    if not idxs_to_show:
-        idxs_to_show = [np.random.choice(np.where(
-            ~pd.isna(df[class_id].values))[0]) for class_id in [1, 2, 3, 4] * 2]
-
-    fig = plt.figure(figsize=(12, 10))
-    pos = 1
-
-    for idx in idxs_to_show:
-        plt.subplot(4, 2, pos)
-        show_mask(idx, df)
-        pos += 1
-
-    fig.suptitle('Типы деффектов', fontsize=14)
-    fig.subplots_adjust(top=0.95)
-    plt.show()
-
-
 # utils/datasets.py
 class SteelSegmentationDataset(Dataset):
     def __init__(self, df, data_dir='severstal-steel-data/train_images', phase='train', mean=None, std=None):
@@ -146,23 +118,6 @@ class SteelSegmentationDataset(Dataset):
 
     def __len__(self):
         return len(self.df.index)
-
-
-class SteelClassificationDataset(Dataset):
-    def __init__(self, df, data_dir='severstal-steel-data/train_images', phase='train', mean=None, std=None):
-        self.df = df
-        self.data_dir = data_dir
-        self.transforms = get_transforms(phase, mean, std)
-
-    def __getitem__(self, idx):
-        fname, target = self.df.iloc[idx].values
-        image = cv2.imread(os.path.join(self.data_dir, fname))
-        image = self.transforms(image=image)['image']
-
-        return image, float(target)
-
-    def __len__(self):
-        return len(self.df)
 
 
 def get_transforms(phase, mean, std, list_transforms=None):
@@ -203,16 +158,33 @@ def data_provider(df, data_dir, phase, dataset_cls, batch_size, stratify_by, n_w
 
 
 # utils/metrics.py
-def roc_auc_score(targets, outputs):
-    probs = torch.sigmoid(outputs)
-    return roc_auc_skl(targets, probs)
+def dice_single_channel(targets, preds, eps=1e-9):
+    batch_size = preds.shape[0]
+
+    preds = preds.view((batch_size, -1)).float()
+    targets = targets.view((batch_size, -1)).float()
+
+    dice = (2 * (preds * targets).sum(1) + eps) / (preds.sum(1) + targets.sum(1) + eps)
+    return dice
 
 
-def accuracy_score(targets, outputs, threshold=0.5):
-    probs = torch.sigmoid(outputs)
-    preds = (probs > threshold).float()
-    return (targets == preds).float().mean().item()
+def mean_dice_score(targets, outputs, threshold=0.5):
+    batch_size = outputs.shape[0]
+    n_channels = outputs.shape[1]
+    preds = (outputs.sigmoid() > threshold).float()
 
+    mean_dice = 0
+    for i in range(n_channels):
+        dice = dice_single_channel(targets[:, i, :, :], preds[:, i, :, :])
+        mean_dice += dice.sum(0) / (n_channels * batch_size)
+    return mean_dice.item()
+
+
+def pixel_accuracy_score(targets, outputs, threshold=0.5):
+    preds = (outputs.sigmoid() > threshold).float()
+    correct = torch.sum((targets == preds)).item()
+    total = outputs.numel()
+    return correct / total
 
 # utils/meter.py
 class Meter:
@@ -278,6 +250,84 @@ class Logger:
 
         self.info(msg)
 
+# utils/optimizers.py
+class RAdam(Optimizer):
+
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0):
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        self.buffer = [[None, None, None] for ind in range(10)]
+        super(RAdam, self).__init__(params, defaults)
+
+    def __setstate__(self, state):
+        super(RAdam, self).__setstate__(state)
+
+    def step(self, closure=None):
+
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad.data.float()
+                if grad.is_sparse:
+                    raise RuntimeError('RAdam does not support sparse gradients')
+
+                p_data_fp32 = p.data.float()
+
+                state = self.state[p]
+
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['exp_avg'] = torch.zeros_like(p_data_fp32)
+                    state['exp_avg_sq'] = torch.zeros_like(p_data_fp32)
+                else:
+                    state['exp_avg'] = state['exp_avg'].type_as(p_data_fp32)
+                    state['exp_avg_sq'] = state['exp_avg_sq'].type_as(p_data_fp32)
+
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                beta1, beta2 = group['betas']
+
+                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                exp_avg.mul_(beta1).add_(1 - beta1, grad)
+
+                state['step'] += 1
+                buffered = self.buffer[int(state['step'] % 10)]
+                if state['step'] == buffered[0]:
+                    N_sma, step_size = buffered[1], buffered[2]
+                else:
+                    buffered[0] = state['step']
+                    beta2_t = beta2 ** state['step']
+                    N_sma_max = 2 / (1 - beta2) - 1
+                    N_sma = N_sma_max - 2 * state['step'] * beta2_t / (1 - beta2_t)
+                    buffered[1] = N_sma
+
+                    # more conservative since it's an approximated value
+                    if N_sma >= 5:
+                        step_size = group['lr'] * math.sqrt(
+                            (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
+                                    N_sma_max - 2)) / (1 - beta1 ** state['step'])
+                    else:
+                        step_size = group['lr'] / (1 - beta1 ** state['step'])
+                    buffered[2] = step_size
+
+                if group['weight_decay'] != 0:
+                    p_data_fp32.add_(-group['weight_decay'] * group['lr'], p_data_fp32)
+
+                # more conservative since it's an approximated value
+                if N_sma >= 5:
+                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+                    p_data_fp32.addcdiv_(-step_size, exp_avg, denom)
+                else:
+                    p_data_fp32.add_(-step_size, exp_avg)
+
+                p.data.copy_(p_data_fp32)
+
+        return loss
+
 
 # utils/trainer.py
 class Trainer:
@@ -292,7 +342,7 @@ class Trainer:
         self.device = torch.device('cuda:0')#cpu')
         self.model = model
         self.model.to(self.device)
-        self.criterion = criterion()
+        self.criterion = criterion(pow_weight=torch.tensor([2.0, 2.0, 1.0, 1.5]))
         self.optimizer = optimizer(model.parameters())
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.9, mode="min", patience=3, verbose=True)
         self.dataloaders = {
@@ -306,7 +356,7 @@ class Trainer:
                                  mean=mean, std=std)
             for phase in self.phases
         }
-        self.metrics_header = {'Accuracy': accuracy_score, 'ROC-AUC': roc_auc_score}
+        self.metrics_header = {'Dice': mean_dice_score, 'Pixelwise accuracy': pixel_accuracy_score}
         self.losses = {phase: [] for phase in self.phases}
         self.metrics = {
             phase: {m_name: [] for m_name in self.metrics_header}
@@ -334,7 +384,6 @@ class Trainer:
         for i, (images, targets) in enumerate(dataloader):
             images, targets = torch.tensor(images, dtype=torch.float), torch.tensor(targets, dtype=torch.float)
             images, targets = images.to(self.device), targets.to(self.device)
-            targets = targets.unsqueeze(1)
 
             outputs = self.model(images)
             loss = self.criterion(outputs, targets)
@@ -365,6 +414,7 @@ class Trainer:
         for m_name in self.metrics_header:
             self.metrics[phase][m_name].append(epoch_metrics[m_name])
 
+        del images, targets, outputs, loss
         torch.cuda.empty_cache()
         return epoch_loss, epoch_metrics
 
@@ -406,19 +456,22 @@ class Trainer:
 
 
 # train.py
-os.makedirs(os.path.join(LOG_DIR, SESSION_ID), exist_ok=False)
+os.makedirs(os.path.join(LOG_DIR, SESSION_ID))
 os.makedirs(os.path.join(LOG_DIR, SESSION_ID, 'model_weights'))
+
 df = pd.read_csv(PATH_TO_DF, index_col=0)
-model = resnet34(pretrained=True)
-model.fc = nn.Linear(model.fc.in_features, 1)
+df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
+df['NumDefects'] = df.count(axis=1)
+
+model = smp.FPN(encoder_name='efficientnet-b2', encoder_weights='imagenet', classes=4, activation=None)
 model_trainer = Trainer(model=model,
                         n_epochs=2,
                         batch_size={'train': 2, 'val': 2},
                         criterion=nn.BCEWithLogitsLoss,
-                        optimizer=optim.Adam,
+                        optimizer=RAdam,
                         df=df,
-                        dataset=SteelClassificationDataset,
-                        data_dir='severstal-steel-data/train_images',
-                        stratify_by='HasDefect'
+                        dataset=SteelSegmentationDataset,
+                        data_dir=DATA_DIR,
+                        stratify_by=''
                         )
 model_trainer.train()

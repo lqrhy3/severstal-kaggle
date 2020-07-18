@@ -1,9 +1,10 @@
-import albumentations as albu
 import numpy as np
 import pandas as pd
 import cv2
 import os
 import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
 
 
 def mask2rle(img):
@@ -32,7 +33,7 @@ def rle2mask(mask_rle, shape=(1600, 256)):
     ends = starts + lengths
     img = np.zeros(shape[0]*shape[1], np.uint8)
     for st, en in zip(starts, ends):
-        img[st:en] = 1
+        img[st:en] = 255
 
     return img.reshape(shape).T
 
@@ -99,3 +100,61 @@ def show_images_with_defects(df, idxs_to_show=None):
 
 def forward_constants(module, **constants):
     module.__globals__.update(constants)
+
+
+def load_model_resnet(model_weights='imagenet', is_inference=True):
+    from torchvision.models import resnet34
+    if model_weights == 'imagenet':
+        model = resnet34(pretrained=True)
+        model.fc = nn.Linear(model.fc.in_features, 1)
+        if is_inference:
+            model.eval()
+        return model
+
+    else:
+        model = resnet34(pretrained=False)
+        model.fc = nn.Linear(model.fc.in_features, 1)
+
+        if is_inference:
+            model.eval()
+
+    if model_weights is not None:
+        device = torch.device('cuda:0')
+        model.to(device)
+        state = torch.load(model_weights)
+        model.load_state_dict(state['state_dict'])
+        optimizer_state = state['optimizer']
+
+        return model, optimizer_state
+    return model
+
+
+def load_model_efficientnet(model_weights='imagenet', is_inference=True):
+    from efficient_pytorch import EfficientNet
+    if model_weights == 'imagenet':
+        model = EfficientNet.from_pretrained('efficientnet-b1')
+        model.fc = nn.Linear(model._fc.in_features, 1)
+        if is_inference:
+            model.eval()
+        return model
+
+    else:
+        model = EfficientNet.from_name('efficientnet-b1')
+        model._fc = nn.Linear(model._fc.in_features, 1)
+
+        if is_inference:
+            model.eval()
+
+    if model_weights is not None:
+        device = torch.device('cuda:0')
+        model.to(device)
+        state = torch.load(model_weights)
+        model.load_state_dict(state['state_dict'])
+        optimizer_state = state['optimizer']
+
+        return model, optimizer_state
+    return model
+
+
+def load_model_fpn():
+    pass

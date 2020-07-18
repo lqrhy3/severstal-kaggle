@@ -54,10 +54,6 @@ class Trainer:
         torch.backends.cudnn.benchmark = True
 
     def _train_step(self, epoch, phase):
-        print('Train step started')
-        print(f'Cuda memory allocated: {torch.cuda.memory_allocated()}'
-              f'\nCuda memory cached: {torch.cuda.memory_cached()}')
-
         start = time.strftime("%H:%M:%S")
         print(f"Starting epoch: {epoch} | phase: {phase} | ⏰: {start}")
 
@@ -103,11 +99,7 @@ class Trainer:
         for m_name in self.metrics_header:
             self.metrics[phase][m_name].append(epoch_metrics[m_name])
 
-        print('Train step finished')
-        torch.cuda.empty_cache()
-        print('Cache deleted')
-        print(f'Cuda memory allocated: {torch.cuda.memory_allocated()}'
-              f'\nCuda memory cached: {torch.cuda.memory_cached()}')
+        del images, targets, outputs, loss
         return epoch_loss, epoch_metrics
 
     def train(self):
