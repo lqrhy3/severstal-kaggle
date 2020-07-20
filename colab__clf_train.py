@@ -28,7 +28,7 @@ setInterval(ConnectButton,60000);'''
 
 # configs/train_params.py
 SESSION_ID = datetime.datetime.now().strftime('%y.%m.%d_%H-%M')
-PATH_TO_DF = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/severstal-steel-data/train_clf.csv'
+PATH_TO_DF = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/severstal-steel-data/train_cls.csv'
 LOG_DIR = 'gdrive/My Drive/Colab Notebooks/Kaggle_Severstal/log'
 DATA_DIR = '.'
 LEARNING_RATE = 1e-4

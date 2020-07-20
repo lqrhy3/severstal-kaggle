@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 
-LOG_DIR = os.path.join('../log/20.07.16_10-33')
+LOG_DIR = os.path.join('../log/20.07.18_18-32')
 SAVE = True
 
 

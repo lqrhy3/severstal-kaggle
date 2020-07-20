@@ -80,10 +80,10 @@ def show_pallet(pallet=((250, 230, 20), (30, 200, 241), (200, 30, 250), (250, 60
     plt.show()
 
 
-def show_images_with_defects(df, idxs_to_show=None):
+def show_images_with_defects(df, idxs_to_show=None, images_per_defect=2):
     if not idxs_to_show:
         idxs_to_show = [np.random.choice(np.where(
-            ~pd.isna(df[class_id].values))[0]) for class_id in [1, 2, 3, 4] * 2]
+            ~pd.isna(df[class_id].values))[0]) for class_id in [1, 2, 3, 4] * images_per_defect]
 
     fig = plt.figure(figsize=(12, 10))
     pos = 1
@@ -158,3 +158,18 @@ def load_model_efficientnet(model_weights='imagenet', is_inference=True):
 
 def load_model_fpn():
     pass
+
+
+def post_process(probability, threshold, min_size):
+    '''Post processing of each predicted mask, components with lesser number of pixels
+    than `min_size` are ignored'''
+    mask = cv2.threshold(probability, threshold, 1, cv2.THRESH_BINARY)[1]
+    num_component, component = cv2.connectedComponents(mask.astype(np.uint8))
+    predictions = np.zeros((256, 1600), np.float32)
+    num = 0
+    for c in range(1, num_component):
+        p = (component == c)
+        if p.sum() > min_size:
+            predictions[p] = 1
+            num += 1
+    return predictions, num

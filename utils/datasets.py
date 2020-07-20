@@ -71,6 +71,22 @@ class SteelHDF5ClassificationDataset(Dataset):
         return len_
 
 
+class TestDataset(Dataset):
+    def __init__(self, data_dir, df, mean=None, std=None):
+        self.data_dir = data_dir
+        self.fnames = df['ImageId'].unique().tolist()
+        self.transforms = get_transforms(phase='test', mean=mean, std=std)
+
+    def __getitem__(self, idx):
+        fname = self.fnames[idx]
+        image = cv2.imread(os.path.join(self.data_dir, fname))
+        image = self.transforms(image=image)["image"]
+        return fname, image
+
+    def __len__(self):
+        return len(self.fnames)
+
+
 def get_transforms(phase, mean, std, list_transforms=None):
     if not list_transforms:
         list_transforms = []
